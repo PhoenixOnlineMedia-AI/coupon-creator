@@ -11,7 +11,8 @@ import fal_client
 import requests
 import streamlit as st
 
-MODEL_ID = "fal-ai/flux-pro/v2"
+PRIMARY_MODEL_ID = "fal-ai/flux-2-pro/edit"
+LEGACY_MODEL_ID = "fal-ai/flux-pro/v2"
 DARREN_TACKETT_PROMPT = """Create a high-end real estate marketing visual for Darren Tackett.
 Use @image1 as the logo in the top-left corner.
 Use @image2 as the logo in the top-right corner.
@@ -99,24 +100,54 @@ def generate_image(
     guidance_scale: float,
     aspect_ratio: str,
 ) -> str:
-    """Upload references and generate a Flux Pro v2 image."""
+    """Upload references and generate an image via Fal Flux models."""
     os.environ["FAL_KEY"] = str(st.secrets["FAL_KEY"]).strip()
     image1_url = upload_reference_image(image1_file)
     image2_url = upload_reference_image(image2_file)
     image3_url = upload_reference_image(image3_file)
 
-    result = fal_client.subscribe(
-        MODEL_ID,
-        arguments={
-            "prompt": prompt,
-            # Order maps to @image1, @image2, and @image3 in prompt text.
-            "image_references": [image1_url, image2_url, image3_url],
-            "guidance_scale": guidance_scale,
-            "aspect_ratio": aspect_ratio,
-        },
-        with_logs=False,
-    )
-    return extract_image_url(result)
+    # Order maps to @image1, @image2, and @image3 in prompt text.
+    image_urls = [image1_url, image2_url, image3_url]
+
+    attempts: list[tuple[str, dict[str, Any]]] = [
+        (
+            PRIMARY_MODEL_ID,
+            {
+                "prompt": prompt,
+                "image_urls": image_urls,
+                "image_size": aspect_ratio,
+                "guidance_scale": guidance_scale,
+            },
+        ),
+        (
+            PRIMARY_MODEL_ID,
+            {
+                "prompt": prompt,
+                "image_urls": image_urls,
+                "image_size": aspect_ratio,
+            },
+        ),
+        (
+            LEGACY_MODEL_ID,
+            {
+                "prompt": prompt,
+                "image_references": image_urls,
+                "guidance_scale": guidance_scale,
+                "aspect_ratio": aspect_ratio,
+            },
+        ),
+    ]
+
+    errors: list[str] = []
+    for model_id, arguments in attempts:
+        try:
+            result = fal_client.subscribe(model_id, arguments=arguments, with_logs=False)
+            return extract_image_url(result)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{model_id}: {exc}")
+
+    joined_errors = " | ".join(errors)
+    raise RuntimeError(f"All Fal generation attempts failed. {joined_errors}")
 
 
 def main() -> None:
