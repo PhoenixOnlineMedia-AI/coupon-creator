@@ -12,9 +12,11 @@ import requests
 import streamlit as st
 
 FLUX_MODEL_ID = "fal-ai/flux-2-pro/edit"
+FLUX_FLEX_MODEL_ID = "fal-ai/flux-2-flex/edit"
 HUNYUAN_MODEL_ID = "fal-ai/hunyuan-image/v3/instruct/edit"
-KLING_MODEL_ID = "fal-ai/kling-image/o3/image-to-image"
 GPT_IMAGE_MODEL_ID = "fal-ai/gpt-image-1.5/edit"
+QWEN_MODEL_ID = "fal-ai/qwen-image-max/edit"
+NANO_BANANA_MODEL_ID = "fal-ai/nano-banana-pro/edit"
 DARREN_TACKETT_PROMPT = """Create a high-end real estate marketing visual for Darren Tackett.
 Use @image1 as the logo in the top-left corner.
 Use @image2 as the logo in the top-right corner.
@@ -32,7 +34,15 @@ FLUX_LIKE_ASPECT_OPTIONS: dict[str, str] = {
     "Square": "square",
     "Auto": "auto",
 }
-KLING_ASPECT_OPTIONS: dict[str, str] = {
+QWEN_ASPECT_OPTIONS: dict[str, str] = {
+    "Portrait (9:16)": "portrait_16_9",
+    "Portrait (3:4)": "portrait_4_3",
+    "Landscape (16:9)": "landscape_16_9",
+    "Landscape (4:3)": "landscape_4_3",
+    "Square HD": "square_hd",
+    "Square": "square",
+}
+NANO_BANANA_ASPECT_OPTIONS: dict[str, str] = {
     "9:16 (Portrait)": "9:16",
     "3:4 (Portrait)": "3:4",
     "16:9 (Landscape)": "16:9",
@@ -56,22 +66,34 @@ MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "default_aspect_label": "Portrait (9:16)",
         "supports_guidance_scale": False,
     },
+    "Flux 2 Flex Edit": {
+        "endpoint": FLUX_FLEX_MODEL_ID,
+        "aspect_options": FLUX_LIKE_ASPECT_OPTIONS,
+        "default_aspect_label": "Portrait (9:16)",
+        "supports_guidance_scale": True,
+    },
     "Hunyuan Image v3 Instruct Edit": {
         "endpoint": HUNYUAN_MODEL_ID,
         "aspect_options": FLUX_LIKE_ASPECT_OPTIONS,
         "default_aspect_label": "Portrait (9:16)",
         "supports_guidance_scale": True,
     },
-    "Kling Image O3 Image-to-Image": {
-        "endpoint": KLING_MODEL_ID,
-        "aspect_options": KLING_ASPECT_OPTIONS,
-        "default_aspect_label": "9:16 (Portrait)",
+    "Qwen Image Max Edit": {
+        "endpoint": QWEN_MODEL_ID,
+        "aspect_options": QWEN_ASPECT_OPTIONS,
+        "default_aspect_label": "Portrait (9:16)",
         "supports_guidance_scale": False,
     },
     "GPT Image 1.5 Edit": {
         "endpoint": GPT_IMAGE_MODEL_ID,
         "aspect_options": GPT_ASPECT_OPTIONS,
         "default_aspect_label": "1024x1536 (Portrait)",
+        "supports_guidance_scale": False,
+    },
+    "Nano Banana Pro Edit": {
+        "endpoint": NANO_BANANA_MODEL_ID,
+        "aspect_options": NANO_BANANA_ASPECT_OPTIONS,
+        "default_aspect_label": "9:16 (Portrait)",
         "supports_guidance_scale": False,
     },
 }
@@ -201,19 +223,50 @@ def build_generation_attempts(
             ),
         ]
 
-    if model_endpoint == KLING_MODEL_ID:
+    if model_endpoint == FLUX_FLEX_MODEL_ID:
         return [
             (
-                KLING_MODEL_ID,
+                FLUX_FLEX_MODEL_ID,
                 {
                     "prompt": prompt,
                     "image_urls": image_urls,
-                    "aspect_ratio": aspect_value,
+                    "image_size": aspect_value,
+                    "guidance_scale": guidance_scale,
                     "output_format": "png",
                 },
             ),
             (
-                KLING_MODEL_ID,
+                FLUX_FLEX_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                    "output_format": "png",
+                },
+            ),
+            (
+                FLUX_FLEX_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "output_format": "png",
+                },
+            ),
+        ]
+
+    if model_endpoint == QWEN_MODEL_ID:
+        return [
+            (
+                QWEN_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                    "output_format": "png",
+                },
+            ),
+            (
+                QWEN_MODEL_ID,
                 {
                     "prompt": prompt,
                     "image_urls": image_urls,
@@ -245,19 +298,30 @@ def build_generation_attempts(
             ),
         ]
 
+    if model_endpoint == NANO_BANANA_MODEL_ID:
+        return [
+            (
+                NANO_BANANA_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "aspect_ratio": aspect_value,
+                    "resolution": "1K",
+                    "output_format": "png",
+                },
+            ),
+            (
+                NANO_BANANA_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "resolution": "1K",
+                    "output_format": "png",
+                },
+            ),
+        ]
+
     raise ValueError(f"Unsupported model endpoint: {model_endpoint}")
-
-
-def normalize_prompt_for_model(model_endpoint: str, prompt: str) -> str:
-    """Adapt prompt reference tags to model-specific conventions."""
-    if model_endpoint != KLING_MODEL_ID:
-        return prompt
-
-    return (
-        prompt.replace("@image1", "@Image1")
-        .replace("@image2", "@Image2")
-        .replace("@image3", "@Image3")
-    )
 
 
 def generate_image(
@@ -271,7 +335,6 @@ def generate_image(
 ) -> str:
     """Upload references and generate an image using selected Fal model."""
     os.environ["FAL_KEY"] = str(st.secrets["FAL_KEY"]).strip()
-    normalized_prompt = normalize_prompt_for_model(model_endpoint, prompt)
     image1_url = upload_reference_image(image1_file)
     image2_url = upload_reference_image(image2_file)
     image3_url = upload_reference_image(image3_file)
@@ -281,7 +344,7 @@ def generate_image(
 
     attempts = build_generation_attempts(
         model_endpoint=model_endpoint,
-        prompt=normalized_prompt,
+        prompt=prompt,
         image_urls=image_urls,
         guidance_scale=guidance_scale,
         aspect_value=aspect_value,
@@ -308,7 +371,7 @@ def main() -> None:
     st.title("Fal Multi-Model Image Generator")
     st.caption(
         "Generate a custom image from three references + prompt using Flux, Hunyuan, "
-        "Kling, or GPT Image."
+        "Qwen, Nano Banana, or GPT Image."
     )
 
     with st.sidebar:
@@ -336,8 +399,8 @@ def main() -> None:
                 step=0.1,
                 disabled=not bool(model_config["supports_guidance_scale"]),
                 help=(
-                    "Used by Hunyuan edit. Higher values follow your prompt more "
-                    "strictly."
+                    "Used by Hunyuan and Flux 2 Flex. Higher values follow your prompt "
+                    "more strictly."
                 ),
             )
             aspect_options = dict(model_config["aspect_options"])
@@ -364,7 +427,7 @@ def main() -> None:
     st.subheader("Prompt")
     st.caption(
         "Prompt references: `@image1` = top-left logo, `@image2` = top-right logo, "
-        "`@image3` = main property photo. Some models also support `@Image1/@Image2`."
+        "`@image3` = main property photo."
     )
     if "prompt_text" not in st.session_state:
         st.session_state["prompt_text"] = ""
