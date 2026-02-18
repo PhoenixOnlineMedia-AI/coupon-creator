@@ -5,11 +5,13 @@ from __future__ import annotations
 import hmac
 import os
 import tempfile
+from io import BytesIO
 from typing import Any
 
 import fal_client
 import requests
 import streamlit as st
+from PIL import Image, UnidentifiedImageError
 
 FLUX_MODEL_ID = "fal-ai/flux-2-pro/edit"
 FLUX_FLEX_MODEL_ID = "fal-ai/flux-2-flex/edit"
@@ -97,6 +99,15 @@ MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "supports_guidance_scale": False,
     },
 }
+MODEL_IMAGE_REQUIREMENTS: dict[str, dict[str, Any]] = {
+    # From Fal schema/docs: each side must be 384-5000px for Qwen edit.
+    QWEN_MODEL_ID: {
+        "min_width": 384,
+        "min_height": 384,
+        "max_width": 5000,
+        "max_height": 5000,
+    },
+}
 
 
 def upload_reference_image(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -> str:
@@ -113,6 +124,45 @@ def upload_reference_image(uploaded_file: st.runtime.uploaded_file_manager.Uploa
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def get_uploaded_image_dimensions(uploaded_file: Any) -> tuple[int, int]:
+    """Return (width, height) from a Streamlit uploaded image."""
+    image = Image.open(BytesIO(uploaded_file.getvalue()))
+    return image.size
+
+
+def validate_image_size_requirements(model_endpoint: str, uploaded_files: list[Any]) -> list[str]:
+    """Validate uploaded image dimensions for models with documented constraints."""
+    requirements = MODEL_IMAGE_REQUIREMENTS.get(model_endpoint)
+    if not requirements:
+        return []
+
+    min_width = int(requirements["min_width"])
+    min_height = int(requirements["min_height"])
+    max_width = int(requirements["max_width"])
+    max_height = int(requirements["max_height"])
+    errors: list[str] = []
+
+    for index, uploaded_file in enumerate(uploaded_files, start=1):
+        try:
+            width, height = get_uploaded_image_dimensions(uploaded_file)
+        except (UnidentifiedImageError, OSError):
+            errors.append(f"Image {index}: could not read image dimensions.")
+            continue
+
+        if width < min_width or height < min_height:
+            errors.append(
+                f"Image {index}: {width}x{height}px is too small. "
+                f"Minimum is {min_width}x{min_height}px."
+            )
+        if width > max_width or height > max_height:
+            errors.append(
+                f"Image {index}: {width}x{height}px is too large. "
+                f"Maximum is {max_width}x{max_height}px."
+            )
+
+    return errors
 
 
 def extract_image_url(result: Any) -> str:
@@ -420,6 +470,13 @@ def main() -> None:
             aspect_ratio = aspect_options[aspect_ratio_label]
 
     st.subheader("Image References")
+    image_requirements = MODEL_IMAGE_REQUIREMENTS.get(model_endpoint)
+    if image_requirements:
+        st.caption(
+            "Selected model upload requirements: each image must be between "
+            f"{image_requirements['min_width']}x{image_requirements['min_height']} and "
+            f"{image_requirements['max_width']}x{image_requirements['max_height']} pixels."
+        )
     image1_file = st.file_uploader("Logo 1 (Top Left)", type=["jpg", "jpeg", "png"])
     image2_file = st.file_uploader("Logo 2 (Top Right)", type=["jpg", "jpeg", "png"])
     image3_file = st.file_uploader("Main Property Photo", type=["jpg", "jpeg", "png"])
@@ -455,6 +512,12 @@ def main() -> None:
 
         if any(file is None for file in [image1_file, image2_file, image3_file]):
             st.error("Please upload all three images before generating.")
+            return
+
+        uploaded_files = [image1_file, image2_file, image3_file]
+        size_errors = validate_image_size_requirements(model_endpoint, uploaded_files)
+        if size_errors:
+            st.error("Upload requirements not met:\n- " + "\n- ".join(size_errors))
             return
 
         if not prompt.strip():
