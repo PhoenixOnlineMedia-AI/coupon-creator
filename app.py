@@ -21,6 +21,29 @@ Keep typography clean, premium, and modern.
 Add a headline that reads: "Darren Tackett".
 Add a subheadline that reads: "Luxury Real Estate".
 Use balanced spacing, strong contrast, and polished social-media-ready composition."""
+ASPECT_RATIO_OPTIONS: dict[str, str] = {
+    "Portrait (9:16)": "portrait_16_9",
+    "Portrait (3:4)": "portrait_4_3",
+    "Landscape (16:9)": "landscape_16_9",
+    "Landscape (4:3)": "landscape_4_3",
+    "Square HD": "square_hd",
+    "Square": "square",
+    "Auto": "auto",
+}
+
+
+def normalize_aspect_ratio(value: str) -> str:
+    """Map UI values and legacy values to valid Flux edit API enums."""
+    legacy_map = {
+        "portrait_9_16": "portrait_16_9",
+        "portrait_3_4": "portrait_4_3",
+        "landscape_16_9": "landscape_16_9",
+        "landscape_4_3": "landscape_4_3",
+        "square_hd": "square_hd",
+        "square": "square",
+        "auto": "auto",
+    }
+    return legacy_map.get(value, "portrait_16_9")
 
 
 def upload_reference_image(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -> str:
@@ -102,6 +125,7 @@ def generate_image(
 ) -> str:
     """Upload references and generate an image via Fal Flux models."""
     os.environ["FAL_KEY"] = str(st.secrets["FAL_KEY"]).strip()
+    normalized_aspect_ratio = normalize_aspect_ratio(aspect_ratio)
     image1_url = upload_reference_image(image1_file)
     image2_url = upload_reference_image(image2_file)
     image3_url = upload_reference_image(image3_file)
@@ -115,7 +139,7 @@ def generate_image(
             {
                 "prompt": prompt,
                 "image_urls": image_urls,
-                "image_size": aspect_ratio,
+                "image_size": normalized_aspect_ratio,
                 "guidance_scale": guidance_scale,
             },
         ),
@@ -124,7 +148,7 @@ def generate_image(
             {
                 "prompt": prompt,
                 "image_urls": image_urls,
-                "image_size": aspect_ratio,
+                "image_size": normalized_aspect_ratio,
             },
         ),
         (
@@ -176,17 +200,13 @@ def main() -> None:
                 step=0.1,
                 help="Higher values follow the prompt more strictly.",
             )
-            aspect_ratio = st.selectbox(
+            aspect_ratio_label = st.selectbox(
                 "Aspect Ratio",
-                options=[
-                    "landscape_16_9",
-                    "portrait_9_16",
-                    "square_hd",
-                    "landscape_4_3",
-                    "portrait_3_4",
-                ],
+                options=list(ASPECT_RATIO_OPTIONS.keys()),
                 index=0,
+                help="Portrait is the default and recommended for your use case.",
             )
+            aspect_ratio = ASPECT_RATIO_OPTIONS[aspect_ratio_label]
 
     st.subheader("Image References")
     image1_file = st.file_uploader("Logo 1 (Top Left)", type=["jpg", "jpeg", "png"])

@@ -1,0 +1,16 @@
+# Local helper tools (do not publish)
+.tools/
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local environment files
+.env
+.env.*
+
+# macOS
+.DS_Store
