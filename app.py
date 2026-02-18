@@ -11,8 +11,10 @@ import fal_client
 import requests
 import streamlit as st
 
-PRIMARY_MODEL_ID = "fal-ai/flux-2-pro/edit"
-LEGACY_MODEL_ID = "fal-ai/flux-pro/v2"
+FLUX_MODEL_ID = "fal-ai/flux-2-pro/edit"
+HUNYUAN_MODEL_ID = "fal-ai/hunyuan-image/v3/instruct/edit"
+KLING_MODEL_ID = "fal-ai/kling-image/o3/image-to-image"
+GPT_IMAGE_MODEL_ID = "fal-ai/gpt-image-1.5/edit"
 DARREN_TACKETT_PROMPT = """Create a high-end real estate marketing visual for Darren Tackett.
 Use @image1 as the logo in the top-left corner.
 Use @image2 as the logo in the top-right corner.
@@ -21,7 +23,7 @@ Keep typography clean, premium, and modern.
 Add a headline that reads: "Darren Tackett".
 Add a subheadline that reads: "Luxury Real Estate".
 Use balanced spacing, strong contrast, and polished social-media-ready composition."""
-ASPECT_RATIO_OPTIONS: dict[str, str] = {
+FLUX_LIKE_ASPECT_OPTIONS: dict[str, str] = {
     "Portrait (9:16)": "portrait_16_9",
     "Portrait (3:4)": "portrait_4_3",
     "Landscape (16:9)": "landscape_16_9",
@@ -30,20 +32,49 @@ ASPECT_RATIO_OPTIONS: dict[str, str] = {
     "Square": "square",
     "Auto": "auto",
 }
-
-
-def normalize_aspect_ratio(value: str) -> str:
-    """Map UI values and legacy values to valid Flux edit API enums."""
-    legacy_map = {
-        "portrait_9_16": "portrait_16_9",
-        "portrait_3_4": "portrait_4_3",
-        "landscape_16_9": "landscape_16_9",
-        "landscape_4_3": "landscape_4_3",
-        "square_hd": "square_hd",
-        "square": "square",
-        "auto": "auto",
-    }
-    return legacy_map.get(value, "portrait_16_9")
+KLING_ASPECT_OPTIONS: dict[str, str] = {
+    "9:16 (Portrait)": "9:16",
+    "3:4 (Portrait)": "3:4",
+    "16:9 (Landscape)": "16:9",
+    "4:3 (Landscape)": "4:3",
+    "1:1 (Square)": "1:1",
+    "2:3 (Portrait)": "2:3",
+    "3:2 (Landscape)": "3:2",
+    "21:9 (Cinematic)": "21:9",
+    "Auto": "auto",
+}
+GPT_ASPECT_OPTIONS: dict[str, str] = {
+    "1024x1536 (Portrait)": "1024x1536",
+    "1536x1024 (Landscape)": "1536x1024",
+    "1024x1024 (Square)": "1024x1024",
+    "Auto": "auto",
+}
+MODEL_CONFIGS: dict[str, dict[str, Any]] = {
+    "Flux 2 Pro Edit": {
+        "endpoint": FLUX_MODEL_ID,
+        "aspect_options": FLUX_LIKE_ASPECT_OPTIONS,
+        "default_aspect_label": "Portrait (9:16)",
+        "supports_guidance_scale": False,
+    },
+    "Hunyuan Image v3 Instruct Edit": {
+        "endpoint": HUNYUAN_MODEL_ID,
+        "aspect_options": FLUX_LIKE_ASPECT_OPTIONS,
+        "default_aspect_label": "Portrait (9:16)",
+        "supports_guidance_scale": True,
+    },
+    "Kling Image O3 Image-to-Image": {
+        "endpoint": KLING_MODEL_ID,
+        "aspect_options": KLING_ASPECT_OPTIONS,
+        "default_aspect_label": "9:16 (Portrait)",
+        "supports_guidance_scale": False,
+    },
+    "GPT Image 1.5 Edit": {
+        "endpoint": GPT_IMAGE_MODEL_ID,
+        "aspect_options": GPT_ASPECT_OPTIONS,
+        "default_aspect_label": "1024x1536 (Portrait)",
+        "supports_guidance_scale": False,
+    },
+}
 
 
 def upload_reference_image(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -> str:
@@ -115,17 +146,132 @@ def require_authentication() -> bool:
     return False
 
 
+def build_generation_attempts(
+    model_endpoint: str,
+    prompt: str,
+    image_urls: list[str],
+    guidance_scale: float,
+    aspect_value: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Build endpoint-specific request payloads with safe fallbacks."""
+    if model_endpoint == FLUX_MODEL_ID:
+        return [
+            (
+                FLUX_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                },
+            ),
+            (
+                FLUX_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                },
+            ),
+        ]
+
+    if model_endpoint == HUNYUAN_MODEL_ID:
+        return [
+            (
+                HUNYUAN_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                    "guidance_scale": guidance_scale,
+                },
+            ),
+            (
+                HUNYUAN_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                },
+            ),
+            (
+                HUNYUAN_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                },
+            ),
+        ]
+
+    if model_endpoint == KLING_MODEL_ID:
+        return [
+            (
+                KLING_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "aspect_ratio": aspect_value,
+                    "output_format": "png",
+                },
+            ),
+            (
+                KLING_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "output_format": "png",
+                },
+            ),
+        ]
+
+    if model_endpoint == GPT_IMAGE_MODEL_ID:
+        return [
+            (
+                GPT_IMAGE_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "image_size": aspect_value,
+                    "quality": "high",
+                    "output_format": "png",
+                },
+            ),
+            (
+                GPT_IMAGE_MODEL_ID,
+                {
+                    "prompt": prompt,
+                    "image_urls": image_urls,
+                    "quality": "high",
+                    "output_format": "png",
+                },
+            ),
+        ]
+
+    raise ValueError(f"Unsupported model endpoint: {model_endpoint}")
+
+
+def normalize_prompt_for_model(model_endpoint: str, prompt: str) -> str:
+    """Adapt prompt reference tags to model-specific conventions."""
+    if model_endpoint != KLING_MODEL_ID:
+        return prompt
+
+    return (
+        prompt.replace("@image1", "@Image1")
+        .replace("@image2", "@Image2")
+        .replace("@image3", "@Image3")
+    )
+
+
 def generate_image(
     prompt: str,
     image1_file: Any,
     image2_file: Any,
     image3_file: Any,
+    model_endpoint: str,
     guidance_scale: float,
-    aspect_ratio: str,
+    aspect_value: str,
 ) -> str:
-    """Upload references and generate an image via Fal Flux models."""
+    """Upload references and generate an image using selected Fal model."""
     os.environ["FAL_KEY"] = str(st.secrets["FAL_KEY"]).strip()
-    normalized_aspect_ratio = normalize_aspect_ratio(aspect_ratio)
+    normalized_prompt = normalize_prompt_for_model(model_endpoint, prompt)
     image1_url = upload_reference_image(image1_file)
     image2_url = upload_reference_image(image2_file)
     image3_url = upload_reference_image(image3_file)
@@ -133,34 +279,13 @@ def generate_image(
     # Order maps to @image1, @image2, and @image3 in prompt text.
     image_urls = [image1_url, image2_url, image3_url]
 
-    attempts: list[tuple[str, dict[str, Any]]] = [
-        (
-            PRIMARY_MODEL_ID,
-            {
-                "prompt": prompt,
-                "image_urls": image_urls,
-                "image_size": normalized_aspect_ratio,
-                "guidance_scale": guidance_scale,
-            },
-        ),
-        (
-            PRIMARY_MODEL_ID,
-            {
-                "prompt": prompt,
-                "image_urls": image_urls,
-                "image_size": normalized_aspect_ratio,
-            },
-        ),
-        (
-            LEGACY_MODEL_ID,
-            {
-                "prompt": prompt,
-                "image_references": image_urls,
-                "guidance_scale": guidance_scale,
-                "aspect_ratio": aspect_ratio,
-            },
-        ),
-    ]
+    attempts = build_generation_attempts(
+        model_endpoint=model_endpoint,
+        prompt=normalized_prompt,
+        image_urls=image_urls,
+        guidance_scale=guidance_scale,
+        aspect_value=aspect_value,
+    )
 
     errors: list[str] = []
     for model_id, arguments in attempts:
@@ -175,21 +300,32 @@ def generate_image(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Flux 2 Pro Image Generator", layout="wide")
+    st.set_page_config(page_title="Fal Multi-Model Image Generator", layout="wide")
 
     if not require_authentication():
         return
 
-    st.title("Flux 2 Pro Multi-Reference Image Generator")
-    st.caption("Generate a custom image from three references + prompt using Fal.ai.")
+    st.title("Fal Multi-Model Image Generator")
+    st.caption(
+        "Generate a custom image from three references + prompt using Flux, Hunyuan, "
+        "Kling, or GPT Image."
+    )
 
     with st.sidebar:
         st.header("Configuration")
         st.markdown(
             "<span style='font-size: 0.85rem; color: #6b7280;'>Powered by</span> "
-            "<span style='font-size: 0.95rem; font-weight: 700;'>Flux 2 Pro</span>",
+            "<span style='font-size: 0.95rem; font-weight: 700;'>Fal AI Models</span>",
             unsafe_allow_html=True,
         )
+        model_label = st.selectbox(
+            "Model",
+            options=list(MODEL_CONFIGS.keys()),
+            index=0,
+        )
+        model_config = MODEL_CONFIGS[model_label]
+        model_endpoint = str(model_config["endpoint"])
+        st.caption(f"Endpoint: `{model_endpoint}`")
 
         with st.expander("Advanced Settings", expanded=False):
             guidance_scale = st.slider(
@@ -198,15 +334,27 @@ def main() -> None:
                 max_value=10.0,
                 value=3.5,
                 step=0.1,
-                help="Higher values follow the prompt more strictly.",
+                disabled=not bool(model_config["supports_guidance_scale"]),
+                help=(
+                    "Used by Hunyuan edit. Higher values follow your prompt more "
+                    "strictly."
+                ),
             )
+            aspect_options = dict(model_config["aspect_options"])
+            aspect_labels = list(aspect_options.keys())
+            default_aspect_label = str(model_config["default_aspect_label"])
             aspect_ratio_label = st.selectbox(
                 "Aspect Ratio",
-                options=list(ASPECT_RATIO_OPTIONS.keys()),
-                index=0,
-                help="Portrait is the default and recommended for your use case.",
+                options=aspect_labels,
+                index=(
+                    aspect_labels.index(default_aspect_label)
+                    if default_aspect_label in aspect_labels
+                    else 0
+                ),
+                key=f"aspect_ratio_{model_endpoint.replace('/', '_')}",
+                help="Aspect ratio is applied using the selected model's valid enum.",
             )
-            aspect_ratio = ASPECT_RATIO_OPTIONS[aspect_ratio_label]
+            aspect_ratio = aspect_options[aspect_ratio_label]
 
     st.subheader("Image References")
     image1_file = st.file_uploader("Logo 1 (Top Left)", type=["jpg", "jpeg", "png"])
@@ -216,7 +364,7 @@ def main() -> None:
     st.subheader("Prompt")
     st.caption(
         "Prompt references: `@image1` = top-left logo, `@image2` = top-right logo, "
-        "`@image3` = main property photo."
+        "`@image3` = main property photo. Some models also support `@Image1/@Image2`."
     )
     if "prompt_text" not in st.session_state:
         st.session_state["prompt_text"] = ""
@@ -257,8 +405,9 @@ def main() -> None:
                     image1_file=image1_file,
                     image2_file=image2_file,
                     image3_file=image3_file,
+                    model_endpoint=model_endpoint,
                     guidance_scale=guidance_scale,
-                    aspect_ratio=aspect_ratio,
+                    aspect_value=aspect_ratio,
                 )
 
             st.success("Image generated successfully.")
@@ -272,7 +421,7 @@ def main() -> None:
                 st.download_button(
                     label="Download Image",
                     data=image_bytes,
-                    file_name="flux2pro-generated.png",
+                    file_name=f"{model_endpoint.split('/')[-1]}-generated.png",
                     mime="image/png",
                     use_container_width=True,
                 )
